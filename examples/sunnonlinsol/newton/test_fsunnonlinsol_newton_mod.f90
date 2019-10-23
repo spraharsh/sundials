@@ -45,7 +45,7 @@ module test_fsunnonlinsol_newton
 
 contains
 
-  integer(C_INT) function unit_tests() result(fails)
+  integer(C_INT) function unit_tests() result(retval)
     use, intrinsic :: iso_c_binding
     use fsundials_nvector_mod
     use fsundials_matrix_mod
@@ -64,7 +64,7 @@ contains
     integer(C_INT)                    :: tmp
     type(IntegratorMem),      pointer :: Imem
 
-    fails = 0
+    retval = 0
 
     ! create mock integrator memory
     allocate(Imem)
@@ -89,18 +89,51 @@ contains
     Imem%A  => FSUNDenseMatrix(NEQ, NEQ)
     Imem%LS => FSUNLinSol_Dense(Imem%y0, Imem%A)
 
-    fails = FSUNLinSolInitialize(Imem%LS)
-    if (fails /= 0) return
+    retval = FSUNLinSolInitialize(Imem%LS)
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNLinSolInitialize returned ', retval
+      return
+    end if
 
+    ! create and test NLS
     NLS => FSUNNonlinsol_Newton(Imem%y0)
 
-    fails = fails + FSUNNonlinSolSetSysFn(NLS, c_funloc(Res))
-    fails = fails + FSUNNonlinSolSetLSetupFn(NLS, c_funloc(LSetup))
-    fails = fails + FSUNNonlinSolSetLSolveFn(NLS, c_funloc(LSolve))
-    fails = fails + FSUNNonlinSolSetConvTestFn(NLS, c_funloc(ConvTest))
-    fails = fails + FSUNNonlinSolSetMaxIters(NLS, MAXIT)
-    fails = fails + FSUNNonlinSolSolve(NLS, Imem%y0, Imem%ycor, Imem%w, &
-                                       TOL, 1, c_loc(Imem))
+    retval = FSUNNonlinSolSetSysFn(NLS, c_funloc(Res))
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolSetSysFn returned ', retval
+      return
+    end if
+
+    retval = FSUNNonlinSolSetLSetupFn(NLS, c_funloc(LSetup))
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolSetLSetupFn returned ', retval
+      return
+    end if
+
+    retval = FSUNNonlinSolSetLSolveFn(NLS, c_funloc(LSolve))
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolSetLSolveFn returned ', retval
+      return
+    end if
+
+    retval = FSUNNonlinSolSetConvTestFn(NLS, c_funloc(ConvTest), c_null_ptr)
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolSetConvTestFn returned ', retval
+      return
+    end if
+
+    retval = FSUNNonlinSolSetMaxIters(NLS, MAXIT)
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolSetMaxIters returned ', retval
+      return
+    end if
+
+    retval = FSUNNonlinSolSolve(NLS, Imem%y0, Imem%ycor, Imem%w, TOL, 1, &
+                                c_loc(Imem))
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolSolve returned ', retval
+      return
+    end if
 
     ! update the initial guess with the final correction
     call FN_VLinearSum(ONE, Imem%y0, ONE, Imem%ycor, Imem%ycur)
@@ -118,7 +151,11 @@ contains
     write(*,'(A,E14.7)') 'e2 = ', ydata(2) - Y2
     write(*,'(A,E14.7)') 'e3 = ', ydata(3) - Y3
 
-    fails = fails + FSUNNonlinSolGetNumIters(NLS, niters)
+    retval = FSUNNonlinSolGetNumIters(NLS, niters)
+    if (retval /= 0) then
+      write(*,'(A,I0)') '   >>> FAIL: FSUNNonlinSolGetNumIters returned ', retval
+      return
+    end if
 
     write(*,'(A,I0)') 'Number of nonlinear iterations:', niters(1)
 
@@ -135,7 +172,7 @@ contains
 
   end function unit_tests
 
-  integer(C_INT) function LSetup(ycor, f, jbad, jcur, mem) &
+  integer(C_INT) function LSetup(jbad, jcur, mem) &
     result(retval) bind(C)
     use, intrinsic :: iso_c_binding
     use fsundials_linearsolver_mod
@@ -143,7 +180,6 @@ contains
 
     implicit none
 
-    type(N_Vector)               :: ycor, f
     type(N_Vector), pointer      :: fy, tmp1, tmp2, tmp3
     integer(C_INT), value        :: jbad
     integer(C_INT), dimension(*) :: jcur
@@ -159,9 +195,6 @@ contains
     ! get the Integrator memory Fortran type out
     call c_f_pointer(mem, Imem)
 
-    ! update the state based on the current correction
-    call FN_VLinearSum(ONE, Imem%y0, ONE, ycor, Imem%ycur)
-
     ! compute the Jacobian
     retval = Jac(0.d0, Imem%ycur, fy, Imem%A, C_NULL_PTR, tmp1, tmp2, tmp3)
     if (retval /= 0) return
@@ -173,7 +206,7 @@ contains
 
   end function
 
-  integer(C_INT) function LSolve(y, b, mem) &
+  integer(C_INT) function LSolve(b, mem) &
     result(retval) bind(C)
     use, intrinsic :: iso_c_binding
     use fsundials_linearsolver_mod
@@ -181,7 +214,7 @@ contains
 
     implicit none
 
-    type(N_Vector)               :: y, b
+    type(N_Vector)               :: b
     type(C_PTR),         value   :: mem
     type(IntegratorMem), pointer :: Imem
 
@@ -295,13 +328,13 @@ program main
   !======== Declarations ========
   implicit none
 
-  integer(C_INT) :: fails = 0
+  integer(C_INT) :: retval = 0
 
   !============== Introduction =============
   print *, 'Newton SUNNonlinearSolver Fortran 2003 interface test'
 
-  fails = unit_tests()
-  if (fails /= 0) then
+  retval = unit_tests()
+  if (retval /= 0) then
     print *, 'FAILURE: n unit tests failed'
     stop 1
   else

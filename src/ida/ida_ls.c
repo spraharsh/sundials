@@ -840,7 +840,7 @@ int idaLsDenseDQJac(realtype tt, realtype c_j, N_Vector yy,
   ewt_data = N_VGetArrayPointer(IDA_mem->ida_ewt);
   y_data   = N_VGetArrayPointer(yy);
   yp_data  = N_VGetArrayPointer(yp);
-  if(IDA_mem->ida_constraints!=NULL)
+  if(IDA_mem->ida_constraintsSet)
     cns_data = N_VGetArrayPointer(IDA_mem->ida_constraints);
 
   srur = SUNRsqrt(IDA_mem->ida_uround);
@@ -865,7 +865,7 @@ int idaLsDenseDQJac(realtype tt, realtype c_j, N_Vector yy,
     inc = (yj + inc) - yj;
 
     /* Adjust sign(inc) again if y_j has an inequality constraint. */
-    if (IDA_mem->ida_constraints != NULL) {
+    if (IDA_mem->ida_constraintsSet) {
       conj = cns_data[j];
       if (SUNRabs(conj) == ONE)      {if((yj+inc)*conj <  ZERO) inc = -inc;}
       else if (SUNRabs(conj) == TWO) {if((yj+inc)*conj <= ZERO) inc = -inc;}
@@ -944,7 +944,7 @@ int idaLsBandDQJac(realtype tt, realtype c_j, N_Vector yy,
   rtemp_data  = N_VGetArrayPointer(rtemp);
   ytemp_data  = N_VGetArrayPointer(ytemp);
   yptemp_data = N_VGetArrayPointer(yptemp);
-  if (IDA_mem->ida_constraints != NULL)
+  if (IDA_mem->ida_constraintsSet)
     cns_data = N_VGetArrayPointer(IDA_mem->ida_constraints);
 
   /* Initialize ytemp and yptemp. */
@@ -974,7 +974,7 @@ int idaLsBandDQJac(realtype tt, realtype c_j, N_Vector yy,
         inc = (yj + inc) - yj;
 
         /* Adjust sign(inc) again if yj has an inequality constraint. */
-        if (IDA_mem->ida_constraints != NULL) {
+        if (IDA_mem->ida_constraintsSet) {
           conj = cns_data[j];
           if (SUNRabs(conj) == ONE)      {if((yj+inc)*conj <  ZERO) inc = -inc;}
           else if (SUNRabs(conj) == TWO) {if((yj+inc)*conj <= ZERO) inc = -inc;}
@@ -1004,7 +1004,7 @@ int idaLsBandDQJac(realtype tt, realtype c_j, N_Vector yy,
                     ONE/ewtj );
       if (IDA_mem->ida_hh*ypj < ZERO)  inc = -inc;
       inc = (yj + inc) - yj;
-      if (IDA_mem->ida_constraints != NULL) {
+      if (IDA_mem->ida_constraintsSet) {
         conj = cns_data[j];
         if (SUNRabs(conj) == ONE)      {if((yj+inc)*conj <  ZERO) inc = -inc;}
         else if (SUNRabs(conj) == TWO) {if((yj+inc)*conj <= ZERO) inc = -inc;}
@@ -1446,10 +1446,8 @@ int idaLsPerf(IDAMem IDA_mem, int perftask)
   nnid = IDA_mem->ida_nni - idals_mem->nni0;
   if (nstd == 0 || nnid == 0) return(0);
 
-  rcfn = (realtype) ( (IDA_mem->ida_ncfn - idals_mem->ncfn0) /
-                      ((realtype) nstd) );
-  rcfl = (realtype) ( (idals_mem->ncfl - idals_mem->ncfl0) /
-                      ((realtype) nnid) );
+  rcfn = ((realtype) (IDA_mem->ida_ncfn - idals_mem->ncfn0)) / ((realtype) nstd);
+  rcfl = ((realtype) (idals_mem->ncfl - idals_mem->ncfl0)) / ((realtype) nnid);
   lcfn = (rcfn > PT9);
   lcfl = (rcfl > PT9);
   if (!(lcfn || lcfl)) return(0);

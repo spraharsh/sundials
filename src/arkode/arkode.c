@@ -83,22 +83,26 @@ ARKodeMem arkCreate()
   }
 
   /* Initialize time step module to NULL */
-  ark_mem->step_attachlinsol = NULL;
-  ark_mem->step_attachmasssol = NULL;
-  ark_mem->step_disablelsetup = NULL;
-  ark_mem->step_disablemsetup = NULL;
-  ark_mem->step_getlinmem = NULL;
-  ark_mem->step_getmassmem = NULL;
+  ark_mem->step_attachlinsol   = NULL;
+  ark_mem->step_attachmasssol  = NULL;
+  ark_mem->step_disablelsetup  = NULL;
+  ark_mem->step_disablemsetup  = NULL;
+  ark_mem->step_getlinmem      = NULL;
+  ark_mem->step_getmassmem     = NULL;
   ark_mem->step_getimplicitrhs = NULL;
-  ark_mem->step_mmult = NULL;
-  ark_mem->step_getgammas = NULL;
-  ark_mem->step_init = NULL;
-  ark_mem->step_fullrhs = NULL;
-  ark_mem->step = NULL;
-  ark_mem->step_mem = NULL;
+  ark_mem->step_mmult          = NULL;
+  ark_mem->step_getgammas      = NULL;
+  ark_mem->step_init           = NULL;
+  ark_mem->step_fullrhs        = NULL;
+  ark_mem->step                = NULL;
+  ark_mem->step_mem            = NULL;
 
   /* Initialize root finding variables */
   ark_mem->root_mem = NULL;
+
+  /* Initialize inequality constraints variables */
+  ark_mem->constraintsSet = SUNFALSE;
+  ark_mem->constraints    = NULL;
 
   /* Initialize diagnostics reporting variables */
   ark_mem->report  = SUNFALSE;
@@ -109,9 +113,10 @@ ARKodeMem arkCreate()
   ark_mem->liw = 39;  /* fcn/data ptr, int, long int, sunindextype, booleantype */
 
   /* No mallocs have been done yet */
-  ark_mem->VabstolMallocDone  = SUNFALSE;
-  ark_mem->VRabstolMallocDone = SUNFALSE;
-  ark_mem->MallocDone         = SUNFALSE;
+  ark_mem->VabstolMallocDone     = SUNFALSE;
+  ark_mem->VRabstolMallocDone    = SUNFALSE;
+  ark_mem->MallocDone            = SUNFALSE;
+  ark_mem->ConstraintsMallocDone = SUNFALSE;
 
   /* No user-supplied step postprocessing function yet */
   ark_mem->ProcessStep = NULL;
@@ -328,15 +333,15 @@ int arkSStolerances(ARKodeMem ark_mem, realtype reltol, realtype abstol)
 
   /* Set flag indicating whether abstol == 0 */
   ark_mem->atolmin0 = (abstol == ZERO);
-  
+
   /* Copy tolerances into memory */
   ark_mem->reltol  = reltol;
   ark_mem->Sabstol = abstol;
   ark_mem->itol    = ARK_SS;
 
-  /* enforce use of arkEwtSet */
+  /* enforce use of arkEwtSetSS */
   ark_mem->user_efun = SUNFALSE;
-  ark_mem->efun      = arkEwtSet;
+  ark_mem->efun      = arkEwtSetSS;
   ark_mem->e_data    = ark_mem;
 
   return(ARK_SUCCESS);
@@ -347,7 +352,7 @@ int arkSVtolerances(ARKodeMem ark_mem, realtype reltol, N_Vector abstol)
 {
   /* local variables */
   realtype abstolmin;
-  
+
   /* Check inputs */
   if (ark_mem==NULL) {
     arkProcessError(NULL, ARK_MEM_NULL, "ARKode",
@@ -364,9 +369,14 @@ int arkSVtolerances(ARKodeMem ark_mem, realtype reltol, N_Vector abstol)
                     "arkSVtolerances", MSG_ARK_BAD_RELTOL);
     return(ARK_ILL_INPUT);
   }
+  if (abstol == NULL) {
+    arkProcessError(ark_mem, ARK_ILL_INPUT, "ARKode",
+                    "arkSVtolerances", MSG_ARK_NULL_ABSTOL);
+    return(ARK_ILL_INPUT);
+  }
   if (abstol->ops->nvmin == NULL) {
     arkProcessError(ark_mem, ARK_ILL_INPUT, "ARKode", "arkSVtolerances",
-                   "Missing N_VMin routine from N_Vector");
+                    "Missing N_VMin routine from N_Vector");
     return(ARK_ILL_INPUT);
   }
   abstolmin = N_VMin(abstol);
@@ -378,7 +388,7 @@ int arkSVtolerances(ARKodeMem ark_mem, realtype reltol, N_Vector abstol)
 
   /* Set flag indicating whether min(abstol) == 0 */
   ark_mem->atolmin0 = (abstolmin == ZERO);
-  
+
   /* Copy tolerances into memory */
   if ( !(ark_mem->VabstolMallocDone) ) {
     ark_mem->Vabstol = N_VClone(ark_mem->ewt);
@@ -390,9 +400,9 @@ int arkSVtolerances(ARKodeMem ark_mem, realtype reltol, N_Vector abstol)
   ark_mem->reltol = reltol;
   ark_mem->itol   = ARK_SV;
 
-  /* enforce use of arkEwtSet */
+  /* enforce use of arkEwtSetSV */
   ark_mem->user_efun = SUNFALSE;
-  ark_mem->efun      = arkEwtSet;
+  ark_mem->efun      = arkEwtSetSV;
   ark_mem->e_data    = ark_mem;
 
   return(ARK_SUCCESS);
@@ -465,7 +475,7 @@ int arkResStolerance(ARKodeMem ark_mem, realtype rabstol)
 
   /* Set flag indicating whether rabstol == 0 */
   ark_mem->Ratolmin0 = (rabstol == ZERO);
-  
+
   /* Allocate space for rwt if necessary */
   if (ark_mem->rwt_is_ewt) {
     ark_mem->rwt_is_ewt = SUNFALSE;
@@ -491,7 +501,7 @@ int arkResVtolerance(ARKodeMem ark_mem, N_Vector rabstol)
 {
   /* local variables */
   realtype rabstolmin;
-  
+
   /* Check inputs */
   if (ark_mem==NULL) {
     arkProcessError(NULL, ARK_MEM_NULL, "ARKode",
@@ -501,6 +511,11 @@ int arkResVtolerance(ARKodeMem ark_mem, N_Vector rabstol)
   if (ark_mem->MallocDone == SUNFALSE) {
     arkProcessError(ark_mem, ARK_NO_MALLOC, "ARKode",
                     "arkResVtolerance", MSG_ARK_NO_MALLOC);
+    return(ARK_NO_MALLOC);
+  }
+  if (rabstol == NULL) {
+    arkProcessError(ark_mem, ARK_NO_MALLOC, "ARKode",
+                    "arkResVtolerance", MSG_ARK_NULL_RABSTOL);
     return(ARK_NO_MALLOC);
   }
   if (rabstol->ops->nvmin == NULL) {
@@ -517,7 +532,7 @@ int arkResVtolerance(ARKodeMem ark_mem, N_Vector rabstol)
 
   /* Set flag indicating whether min(abstol) == 0 */
   ark_mem->Ratolmin0 = (rabstolmin == ZERO);
-  
+
   /* Allocate space for rwt if necessary */
   if (ark_mem->rwt_is_ewt) {
     ark_mem->rwt_is_ewt = SUNFALSE;
@@ -976,44 +991,6 @@ void arkFree(void **arkode_mem)
   ===============================================================*/
 
 /*---------------------------------------------------------------
-  arkEwtSet
-
-  This routine is responsible for setting the error weight vector ewt,
-  according to tol_type, as follows:
-
-  (1) ewt[i] = 1 / (reltol * SUNRabs(ycur[i]) + abstol), i=0,...,neq-1
-      if tol_type = ARK_SS
-  (2) ewt[i] = 1 / (reltol * SUNRabs(ycur[i]) + abstol[i]), i=0,...,neq-1
-      if tol_type = ARK_SV
-
-  arkEwtSet returns 0 if ewt is successfully set as above to a
-  positive vector and -1 otherwise. In the latter case, ewt is
-  considered undefined.
-
-  All the real work is done in the routines arkEwtSetSS, arkEwtSetSV.
-  ---------------------------------------------------------------*/
-int arkEwtSet(N_Vector ycur, N_Vector weight, void *data)
-{
-  ARKodeMem ark_mem;
-  int flag = 0;
-
-  /* data points to ark_mem here */
-  ark_mem = (ARKodeMem) data;
-
-  switch(ark_mem->itol) {
-  case ARK_SS:
-    flag = arkEwtSetSS(ark_mem, ycur, weight);
-    break;
-  case ARK_SV:
-    flag = arkEwtSetSV(ark_mem, ycur, weight);
-    break;
-  }
-
-  return(flag);
-}
-
-
-/*---------------------------------------------------------------
   arkRwtSet
 
   This routine is responsible for setting the residual weight
@@ -1309,6 +1286,11 @@ void arkPrintMem(ARKodeMem ark_mem, FILE *outfile)
   fprintf(outfile, "ark_tn = %" RSYM"\n", ark_mem->tn);
   fprintf(outfile, "ark_hold = %" RSYM"\n", ark_mem->hold);
 
+  /* output inequality constraints quantities */
+  fprintf(outfile, "ark_constraintsSet = %i\n", ark_mem->constraintsSet);
+  fprintf(outfile, "ark_ConstraintsDone = %i\n", ark_mem->ConstraintsMallocDone);
+  fprintf(outfile, "ark_maxconstrfails = %i\n", ark_mem->maxconstrfails);
+
   /* output root-finding quantities */
   if (ark_mem->root_mem != NULL)
     (void) arkPrintRootMem((void*) ark_mem, outfile);
@@ -1354,6 +1336,10 @@ void arkPrintMem(ARKodeMem ark_mem, FILE *outfile)
   if (ark_mem->tempv4 != NULL) {
     fprintf(outfile, "ark_tempv4:\n");
     N_VPrint_Serial(ark_mem->tempv4);
+  }
+  if (ark_mem->constraints != NULL) {
+    fprintf(outfile, "ark_constraints:\n");
+    N_VPrint_Serial(ark_mem->constraints);
   }
 #endif
 
@@ -1548,6 +1534,8 @@ void arkFreeVectors(ARKodeMem ark_mem)
   arkFreeVec(ark_mem, &ark_mem->tempv4);
   arkFreeVec(ark_mem, &ark_mem->yn);
   arkFreeVec(ark_mem, &ark_mem->Vabstol);
+  if (ark_mem->ConstraintsMallocDone)
+    arkFreeVec(ark_mem, &ark_mem->constraints);
 }
 
 
@@ -1565,6 +1553,7 @@ int arkInitialSetup(ARKodeMem ark_mem, realtype tout)
 {
   int retval, hflag, istate, ier;
   realtype tout_hin, rh;
+  booleantype conOK;
 
   /* Temporarily set ark_h */
   ark_mem->h = SUNRabs(tout - ark_mem->tcur);
@@ -1590,7 +1579,7 @@ int arkInitialSetup(ARKodeMem ark_mem, realtype tout)
     return(ARK_ILL_INPUT);
   }
 
-  /* If using a built-in routine for error/residual weights with abstol==0, 
+  /* If using a built-in routine for error/residual weights with abstol==0,
      ensure that N_VMin is available */
   if ((!ark_mem->user_efun) && (ark_mem->atolmin0) && (!ark_mem->yn->ops->nvmin)) {
     arkProcessError(ark_mem, ARK_ILL_INPUT, "ARKode", "arkInitialSetup",
@@ -1602,6 +1591,15 @@ int arkInitialSetup(ARKodeMem ark_mem, realtype tout)
     arkProcessError(ark_mem, ARK_ILL_INPUT, "ARKode", "arkInitialSetup",
                     "N_VMin unimplemented (required by residual-weight function)");
     return(ARK_ILL_INPUT);
+  }
+
+  /* Check to see if y0 satisfies constraints */
+  if (ark_mem->constraintsSet) {
+    conOK = N_VConstrMask(ark_mem->constraints, ark_mem->yn, ark_mem->tempv1);
+    if (!conOK) {
+      arkProcessError(ark_mem, ARK_ILL_INPUT, "ARKode", "arkInitialSetup", MSG_ARK_Y0_FAIL_CONSTR);
+      return(ARK_ILL_INPUT);
+    }
   }
 
   /* Load initial error weights */
@@ -2257,6 +2255,9 @@ int arkHandleFailure(ARKodeMem ark_mem, int flag)
     arkProcessError(ark_mem, ARK_TOO_CLOSE, "ARKode", "ARKode",
                     MSG_ARK_TOO_CLOSE);
     break;
+  case ARK_CONSTR_FAIL:
+    arkProcessError(ark_mem, ARK_CONSTR_FAIL, "ARKode", "ARKode",
+                    MSG_ARK_FAILED_CONSTR, ark_mem->tcur);
   case ARK_MASSSOLVE_FAIL:
     arkProcessError(ark_mem, ARK_MASSSOLVE_FAIL, "ARKode", "ARKode",
                     MSG_ARK_MASSSOLVE_FAIL);
@@ -2274,6 +2275,10 @@ int arkHandleFailure(ARKodeMem ark_mem, int flag)
     arkProcessError(ark_mem, ARK_INNERSTEP_FAIL, "ARKode", "ARKode",
                     MSG_ARK_INNERSTEP_FAILED, ark_mem->tcur);
     break;
+  case ARK_NLS_OP_ERR:
+    arkProcessError(ark_mem, ARK_NLS_OP_ERR, "ARKode", "ARKode",
+                    MSG_ARK_NLS_FAIL, ark_mem->tcur);
+    break;
   default:
     /* This return should never happen */
     arkProcessError(ark_mem, ARK_UNRECOGNIZED_ERROR, "ARKode", "ARKode",
@@ -2288,14 +2293,19 @@ int arkHandleFailure(ARKodeMem ark_mem, int flag)
 /*---------------------------------------------------------------
   arkEwtSetSS
 
-  This routine sets ewt as decribed above in the case tol_type = ARK_SS.
+  This routine is responsible for setting the error weight vector
+  ewt as follows:
+
+  ewt[i] = 1 / (reltol * SUNRabs(ycur[i]) + abstol), i=0,...,neq-1
+
   When the absolute tolerance is zero, it tests for non-positive
   components before inverting. arkEwtSetSS returns 0 if ewt is
   successfully set to a positive vector and -1 otherwise. In the
   latter case, ewt is considered undefined.
   ---------------------------------------------------------------*/
-int arkEwtSetSS(ARKodeMem ark_mem, N_Vector ycur, N_Vector weight)
+int arkEwtSetSS(N_Vector ycur, N_Vector weight, void* arkode_mem)
 {
+  ARKodeMem ark_mem = (ARKodeMem) arkode_mem;
   N_VAbs(ycur, ark_mem->tempv1);
   N_VScale(ark_mem->reltol, ark_mem->tempv1, ark_mem->tempv1);
   N_VAddConst(ark_mem->tempv1, ark_mem->Sabstol, ark_mem->tempv1);
@@ -2310,14 +2320,19 @@ int arkEwtSetSS(ARKodeMem ark_mem, N_Vector ycur, N_Vector weight)
 /*---------------------------------------------------------------
   arkEwtSetSV
 
-  This routine sets ewt as decribed above in the case tol_type = ARK_SV.
+  This routine is responsible for setting the error weight vector
+  ewt as follows:
+
+  ewt[i] = 1 / (reltol * SUNRabs(ycur[i]) + abstol[i]), i=0,...,neq-1
+
   When any absolute tolerance is zero, it tests for non-positive
   components before inverting. arkEwtSetSV returns 0 if ewt is
   successfully set to a positive vector and -1 otherwise. In the
   latter case, ewt is considered undefined.
   ---------------------------------------------------------------*/
-int arkEwtSetSV(ARKodeMem ark_mem, N_Vector ycur, N_Vector weight)
+int arkEwtSetSV(N_Vector ycur, N_Vector weight, void* arkode_mem)
 {
+  ARKodeMem ark_mem = (ARKodeMem) arkode_mem;
   N_VAbs(ycur, ark_mem->tempv1);
   N_VLinearSum(ark_mem->reltol, ark_mem->tempv1, ONE,
                ark_mem->Vabstol, ark_mem->tempv1);
@@ -2326,6 +2341,25 @@ int arkEwtSetSV(ARKodeMem ark_mem, N_Vector ycur, N_Vector weight)
   }
   N_VInv(ark_mem->tempv1, weight);
   return(0);
+}
+
+
+/*---------------------------------------------------------------
+  arkEwtSetSmallReal
+
+  This routine is responsible for setting the error weight vector
+  ewt as follows:
+
+  ewt[i] = SMALL_REAL
+
+  This is routine is only used with explicit time stepping with
+  a fixed step size to avoid a potential too much error return
+  to the user.
+  ---------------------------------------------------------------*/
+int arkEwtSetSmallReal(N_Vector ycur, N_Vector weight, void* arkode_mem)
+{
+  N_VConst(SMALL_REAL, weight);
+  return(ARK_SUCCESS);
 }
 
 
@@ -2552,6 +2586,57 @@ int arkPredict_Bootstrap(ARKodeMem ark_mem, realtype hj,
 
   /* call fused vector operation to compute prediction */
   return(N_VLinearCombination(nvec+2, cvals, Xvecs, yguess));
+}
+
+
+/*---------------------------------------------------------------
+  arkCheckConstraints
+
+  This routine determines if the constraints of the problem
+  are satisfied by the proposed step
+
+  Returns ARK_SUCCESS if successful, otherwise CONSTR_RECVR
+  --------------------------------------------------------------*/
+int arkCheckConstraints(ARKodeMem ark_mem, int *constrfails, int *nflag)
+{
+  booleantype constraintsPassed;
+  N_Vector mm  = ark_mem->tempv4;
+  N_Vector tmp = ark_mem->tempv1;
+
+  /* Check constraints and get mask vector mm for where constraints failed */
+  constraintsPassed = N_VConstrMask(ark_mem->constraints, ark_mem->ycur, mm);
+  if (constraintsPassed) return(ARK_SUCCESS);
+
+  /* Constraints not met */
+
+  /* Update total fails and fails in current step */
+  ark_mem->nconstrfails++;
+  (*constrfails)++;
+
+  /* Return with error if reached max fails in a step */
+  if (*constrfails == ark_mem->maxconstrfails) return(ARK_CONSTR_FAIL);
+
+  /* Return with error if using fixed step sizes */
+  if (ark_mem->fixedstep) return(ARK_CONSTR_FAIL);
+
+  /* Return with error if |h| == hmin */
+  if (SUNRabs(ark_mem->h) <= ark_mem->hmin*ONEPSM) return(ARK_CONSTR_FAIL);
+
+  /* Reduce h by computing eta = h'/h */
+  N_VLinearSum(ONE, ark_mem->yn, -ONE, ark_mem->ycur, tmp);
+  N_VProd(mm, tmp, tmp);
+  ark_mem->eta = PT9*N_VMinQuotient(ark_mem->yn, tmp);
+  ark_mem->eta = SUNMAX(ark_mem->eta, TENTH);
+  ark_mem->eta = SUNMAX(ark_mem->eta,
+                        ark_mem->hmin / SUNRabs(ark_mem->h));
+  ark_mem->h *= ark_mem->eta;
+  ark_mem->next_h = ark_mem->h;
+
+  /* Signal for Jacobian setup if nflag was provided */
+  if (nflag) *nflag = PREV_CONV_FAIL;
+
+  /* Reattempt step with new step size */
+  return(CONSTR_RECVR);
 }
 
 

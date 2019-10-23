@@ -89,6 +89,7 @@ SUNNonlinearSolver SUNNonlinSol_Newton(N_Vector y)
   content->maxiters   = 3;
   content->niters     = 0;
   content->nconvfails = 0;
+  content->ctest_data = NULL;
 
   /* Fill allocatable content */
   content->delta = N_VClone(y);
@@ -219,7 +220,7 @@ int SUNNonlinSolSolve_Newton(SUNNonlinearSolver NLS,
 
     /* if indicated, setup the linear system */
     if (callLSetup) {
-      retval = NEWTON_CONTENT(NLS)->LSetup(ycor, delta, jbad,
+      retval = NEWTON_CONTENT(NLS)->LSetup(jbad,
                                            &(NEWTON_CONTENT(NLS)->jcur),
                                            mem);
       if (retval != SUN_NLS_SUCCESS) break;
@@ -238,14 +239,15 @@ int SUNNonlinSolSolve_Newton(SUNNonlinearSolver NLS,
       N_VScale(-ONE, delta, delta);
 
       /* solve the linear system to get Newton update delta */
-      retval = NEWTON_CONTENT(NLS)->LSolve(ycor, delta, mem);
+      retval = NEWTON_CONTENT(NLS)->LSolve(delta, mem);
       if (retval != SUN_NLS_SUCCESS) break;
 
       /* update the Newton iterate */
       N_VLinearSum(ONE, ycor, ONE, delta, ycor);
 
       /* test for convergence */
-      retval = NEWTON_CONTENT(NLS)->CTest(NLS, ycor, delta, tol, w, mem);
+      retval = NEWTON_CONTENT(NLS)->CTest(NLS, ycor, delta, tol, w,
+                                          NEWTON_CONTENT(NLS)->ctest_data);
 
       /* if successful update Jacobian status and return */
       if (retval == SUN_NLS_SUCCESS) {
@@ -370,7 +372,9 @@ int SUNNonlinSolSetLSolveFn_Newton(SUNNonlinearSolver NLS, SUNNonlinSolLSolveFn 
 }
 
 
-int SUNNonlinSolSetConvTestFn_Newton(SUNNonlinearSolver NLS, SUNNonlinSolConvTestFn CTestFn)
+int SUNNonlinSolSetConvTestFn_Newton(SUNNonlinearSolver NLS,
+                                     SUNNonlinSolConvTestFn CTestFn,
+                                     void* ctest_data)
 {
   /* check that the nonlinear solver is non-null */
   if (NLS == NULL)
@@ -381,6 +385,10 @@ int SUNNonlinSolSetConvTestFn_Newton(SUNNonlinearSolver NLS, SUNNonlinSolConvTes
     return(SUN_NLS_ILL_INPUT);
 
   NEWTON_CONTENT(NLS)->CTest = CTestFn;
+
+  /* attach convergence test data */
+  NEWTON_CONTENT(NLS)->ctest_data = ctest_data;
+
   return(SUN_NLS_SUCCESS);
 }
 

@@ -1,4 +1,5 @@
-/* -----------------------------------------------------------------
+/*
+ * -----------------------------------------------------------------
  * Programmer(s): Alan C. Hindmarsh and Radu Serban @ LLNL
  * -----------------------------------------------------------------
  * SUNDIALS Copyright Start
@@ -6089,7 +6090,7 @@ static void cvRescale(CVodeMem cv_mem)
 
   /* compute scaling factors */
   cv_mem->cv_cvals[0] = cv_mem->cv_eta;
-  for (j=1; j < cv_mem->cv_q; j++)
+  for (j=1; j <= cv_mem->cv_q; j++)
     cv_mem->cv_cvals[j] = cv_mem->cv_eta * cv_mem->cv_cvals[j-1];
 
   (void) N_VScaleVectorArray(cv_mem->cv_q, cv_mem->cv_cvals,
@@ -6103,7 +6104,7 @@ static void cvRescale(CVodeMem cv_mem)
   if (cv_mem->cv_sensi || cv_mem->cv_quadr_sensi) {
     for (is=0; is<cv_mem->cv_Ns; is++)
       cv_mem->cv_cvals[is] = cv_mem->cv_eta;
-    for (j=1; j < cv_mem->cv_q; j++)
+    for (j=1; j <= cv_mem->cv_q; j++)
       for (is=0; is<cv_mem->cv_Ns; is++)
         cv_mem->cv_cvals[j*cv_mem->cv_Ns+is] =
           cv_mem->cv_eta * cv_mem->cv_cvals[(j-1)*cv_mem->cv_Ns+is];
@@ -6543,53 +6544,56 @@ static int cvNls(CVodeMem cv_mem, int nflag)
  *
  * Possible return values are:
  *
- *   CV_SUCCESS    ---> allows stepping forward
+ *   CV_SUCCESS     ---> allows stepping forward
  *
- *   CONSTR_RECVR  ---> values failed to satisfy constraints
+ *   CONSTR_RECVR   ---> values failed to satisfy constraints
+ *
+ *   CV_CONSTR_FAIL ---> values failed to satisfy constraints with hmin
  */
 
 static int cvCheckConstraints(CVodeMem cv_mem)
 {
   booleantype constraintsPassed;
   realtype vnorm;
-  cv_mem->cv_mm = cv_mem->cv_ftemp;
+  N_Vector mm  = cv_mem->cv_ftemp;
+  N_Vector tmp = cv_mem->cv_tempv;
 
   /* Get mask vector mm, set where constraints failed */
-
-  constraintsPassed = N_VConstrMask(cv_mem->cv_constraints,
-                                    cv_mem->cv_y, cv_mem->cv_mm);
+  constraintsPassed = N_VConstrMask(cv_mem->cv_constraints, cv_mem->cv_y, mm);
   if (constraintsPassed) return(CV_SUCCESS);
-  else {
-    N_VCompare(ONEPT5, cv_mem->cv_constraints, cv_mem->cv_tempv);
-    /* a, where a[i]=1 when |c[i]|=2; c the vector of constraints */
-    N_VProd(cv_mem->cv_tempv, cv_mem->cv_constraints,
-            cv_mem->cv_tempv);                        /* a * c */
-    N_VDiv(cv_mem->cv_tempv, cv_mem->cv_ewt,
-           cv_mem->cv_tempv);                         /* a * c * wt */
-    N_VLinearSum(ONE, cv_mem->cv_y, -PT1,
-                 cv_mem->cv_tempv, cv_mem->cv_tempv); /* y - 0.1 * a * c * wt */
-    N_VProd(cv_mem->cv_tempv, cv_mem->cv_mm,
-            cv_mem->cv_tempv);                        /* v = mm*(y-0.1*a*c*wt) */
 
-    vnorm = N_VWrmsNorm(cv_mem->cv_tempv, cv_mem->cv_ewt); /*  ||v||  */
+  /* Constraints not met */
 
-    /* If vector v of constraint corrections is small in
-       norm, correct and accept this step */
-    if (vnorm <= cv_mem->cv_tq[4]) {
-      N_VLinearSum(ONE, cv_mem->cv_acor, -ONE,
-                   cv_mem->cv_tempv, cv_mem->cv_acor);    /* acor <- acor - v */
-      return(CV_SUCCESS);
-    }
-    else {
-      /* Constraints not met - reduce h by computing eta = h'/h */
-      N_VLinearSum(ONE, cv_mem->cv_zn[0], -ONE, cv_mem->cv_y, cv_mem->cv_tempv);
-      N_VProd(cv_mem->cv_mm, cv_mem->cv_tempv, cv_mem->cv_tempv);
-      cv_mem->cv_eta = PT9*N_VMinQuotient(cv_mem->cv_zn[0], cv_mem->cv_tempv);
-      cv_mem->cv_eta = SUNMAX(cv_mem->cv_eta, PT1);
-      return(CONSTR_RECVR);
-    }
+  /* Compute correction to satisfy constraints */
+  N_VCompare(ONEPT5, cv_mem->cv_constraints, tmp); /* a[i]=1 when |c[i]|=2  */
+  N_VProd(tmp, cv_mem->cv_constraints, tmp);       /* a * c                 */
+  N_VDiv(tmp, cv_mem->cv_ewt, tmp);                /* a * c * wt            */
+  N_VLinearSum(ONE, cv_mem->cv_y, -PT1, tmp, tmp); /* y - 0.1 * a * c * wt  */
+  N_VProd(tmp, mm, tmp);                           /* v = mm*(y-0.1*a*c*wt) */
+
+  vnorm = N_VWrmsNorm(tmp, cv_mem->cv_ewt);        /* ||v|| */
+
+  /* If vector v of constraint corrections is small in norm, correct and
+     accept this step */
+  if (vnorm <= cv_mem->cv_tq[4]) {
+    N_VLinearSum(ONE, cv_mem->cv_acor,
+                 -ONE, tmp, cv_mem->cv_acor);      /* acor <- acor - v */
+    return(CV_SUCCESS);
   }
-  return(CV_SUCCESS);
+
+  /* Return with error if |h| == hmin */
+  if (SUNRabs(cv_mem->cv_h) <= cv_mem->cv_hmin*ONEPSM) return(CV_CONSTR_FAIL);
+
+  /* Constraint correction is too large, reduce h by computing eta = h'/h */
+  N_VLinearSum(ONE, cv_mem->cv_zn[0], -ONE, cv_mem->cv_y, tmp);
+  N_VProd(mm, tmp, tmp);
+  cv_mem->cv_eta = PT9*N_VMinQuotient(cv_mem->cv_zn[0], tmp);
+  cv_mem->cv_eta = SUNMAX(cv_mem->cv_eta, PT1);
+  cv_mem->cv_eta = SUNMAX(cv_mem->cv_eta,
+                          cv_mem->cv_hmin / SUNRabs(cv_mem->cv_h));
+
+  /* Reattempt step with new step size */
+  return(CONSTR_RECVR);
 }
 
 /*
@@ -6804,6 +6808,9 @@ static int cvStgr1Nls(CVodeMem cv_mem, int is)
  * If it failed due to an unrecoverable failure in sensi rhs, then we return
  * the value CV_SRHSFUNC_FAIL.
  *
+ * If it failed due to an unrecoverable failure in sensi quad rhs, then we
+ * return the value CV_QSRHSFUNC_FAIL.
+ *
  * Otherwise, a recoverable failure occurred when solving the
  * nonlinear system (cvNls returned nflag = SUN_NLS_CONV_RECVT, RHSFUNC_RECVR,
  * or SRHSFUNC_RECVR).
@@ -6830,7 +6837,15 @@ static int cvHandleNFlag(CVodeMem cv_mem, int *nflagPtr, realtype saved_t,
   cvRestore(cv_mem, saved_t);
 
   /* Return if failed unrecoverably */
-  if (nflag < 0) return(nflag);
+  if (nflag < 0) {
+    if (nflag == CV_LSETUP_FAIL)         return(CV_LSETUP_FAIL);
+    else if (nflag == CV_LSOLVE_FAIL)    return(CV_LSOLVE_FAIL);
+    else if (nflag == CV_RHSFUNC_FAIL)   return(CV_RHSFUNC_FAIL);
+    else if (nflag == CV_QRHSFUNC_FAIL)  return(CV_QRHSFUNC_FAIL);
+    else if (nflag == CV_SRHSFUNC_FAIL)  return(CV_SRHSFUNC_FAIL);
+    else if (nflag == CV_QSRHSFUNC_FAIL) return(CV_QSRHSFUNC_FAIL);
+    else                                 return(CV_NLS_FAIL);
+  }
 
   /* At this point, nflag = SUN_NLS_CONV_RECVR, CONSTR_RECVR, RHSFUNC_RECVR,
      or SRHSFUNC_RECVR; increment ncf */
@@ -7490,8 +7505,14 @@ static int cvHandleFailure(CVodeMem cv_mem, int flag)
   case CV_CONSTR_FAIL:
     cvProcessError(cv_mem, CV_CONSTR_FAIL, "CVODES", "CVode",
                    MSGCV_FAILED_CONSTR, cv_mem->cv_tn);
+  case CV_NLS_FAIL:
+    cvProcessError(cv_mem, CV_NLS_FAIL, "CVODES", "CVode",
+                   MSGCV_NLS_FAIL, cv_mem->cv_tn);
+    break;
   default:
-    return(CV_SUCCESS);
+    cvProcessError(cv_mem, CV_UNRECOGNIZED_ERR, "CVODES", "CVode",
+                   "CVODES encountered an unrecognized error. Please report this to the Sundials developers at sundials-users@llnl.gov");
+    return (CV_UNRECOGNIZED_ERR);
   }
 
   return(flag);

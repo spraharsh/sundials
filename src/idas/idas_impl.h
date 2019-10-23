@@ -184,7 +184,6 @@ typedef struct IDAMemRec {
   N_Vector ida_ee;           /* accumulated corrections to y vector, but
                                 set equal to estimated local errors upon
                                 successful return                             */
-  N_Vector ida_mm;           /* mask vector in constraints tests (= tempv2)   */
   N_Vector ida_tempv1;       /* work space vector                             */
   N_Vector ida_tempv2;       /* work space vector                             */
   N_Vector ida_tempv3;       /* work space vector                             */
@@ -587,7 +586,7 @@ struct CkpntMemRec {
   /* Step data */
   long int     ck_nst;
   realtype     ck_tretlast;
-  long int     ck_ns;
+  int          ck_ns;
   int          ck_kk;
   int          ck_kused;
   int          ck_knew;
@@ -738,6 +737,11 @@ struct IDAadjMemRec {
   /* Flag if IDASolveF was called with TSTOP */
   booleantype ia_tstopIDAFcall;
   realtype ia_tstopIDAF;
+
+  /* Flag if IDASolveF was called in IDA_NORMAL_MODE and encountered
+     a root after tout */
+  booleantype ia_rootret;
+  realtype ia_troot;
 
   /* ----------------------
    * Backward problems data
@@ -1084,18 +1088,20 @@ int IDASensResDQ(int Ns, realtype t,
 #define MSG_NULL_DKY     "dky = NULL illegal."
 #define MSG_NULL_DKYP    "dkyp = NULL illegal."
 
-#define MSG_ERR_FAILS      "At " MSG_TIME_H "the error test failed repeatedly or with |h| = hmin."
-#define MSG_CONV_FAILS     "At " MSG_TIME_H "the corrector convergence failed repeatedly or with |h| = hmin."
-#define MSG_SETUP_FAILED   "At " MSG_TIME "the linear solver setup failed unrecoverably."
-#define MSG_SOLVE_FAILED   "At " MSG_TIME "the linear solver solve failed unrecoverably."
-#define MSG_REP_RES_ERR    "At " MSG_TIME "repeated recoverable residual errors."
-#define MSG_RES_NONRECOV   "At " MSG_TIME "the residual function failed unrecoverably."
-#define MSG_FAILED_CONSTR  "At " MSG_TIME "unable to satisfy inequality constraints."
-#define MSG_RTFUNC_FAILED  "At " MSG_TIME ", the rootfinding routine failed in an unrecoverable manner."
-#define MSG_NO_ROOT        "Rootfinding was not initialized."
-#define MSG_INACTIVE_ROOTS "At the end of the first step, there are still some root functions identically 0. This warning will not be issued again."
-#define MSG_NLS_INPUT_NULL "At " MSG_TIME "the nonlinear solver was passed a NULL input."
-#define MSG_NLS_SETUP_FAILED "At " MSG_TIME "the nonlinear solver setup failed unrecoverably."
+#define MSG_ERR_FAILS        "At " MSG_TIME_H "the error test failed repeatedly or with |h| = hmin."
+#define MSG_CONV_FAILS       "At " MSG_TIME_H "the corrector convergence failed repeatedly or with |h| = hmin."
+#define MSG_SETUP_FAILED     "At " MSG_TIME "the linear solver setup failed unrecoverably."
+#define MSG_SOLVE_FAILED     "At " MSG_TIME "the linear solver solve failed unrecoverably."
+#define MSG_REP_RES_ERR      "At " MSG_TIME "repeated recoverable residual errors."
+#define MSG_RES_NONRECOV     "At " MSG_TIME "the residual function failed unrecoverably."
+#define MSG_FAILED_CONSTR    "At " MSG_TIME "unable to satisfy inequality constraints."
+#define MSG_RTFUNC_FAILED    "At " MSG_TIME ", the rootfinding routine failed in an unrecoverable manner."
+#define MSG_NO_ROOT          "Rootfinding was not initialized."
+#define MSG_INACTIVE_ROOTS   "At the end of the first step, there are still some root functions identically 0. This warning will not be issued again."
+#define MSG_NLS_INPUT_NULL   "At " MSG_TIME ", the nonlinear solver was passed a NULL input."
+#define MSG_NLS_SETUP_FAILED "At " MSG_TIME ", the nonlinear solver setup failed unrecoverably."
+#define MSG_NLS_FAIL         "At " MSG_TIME ", the nonlinear solver failed in an unrecoverable manner."
+
 
 #define MSG_EWTQ_NOW_BAD "At " MSG_TIME ", a component of ewtQ has become <= 0."
 #define MSG_QRHSFUNC_FAILED "At " MSG_TIME ", the quadrature right-hand side routine failed in an unrecoverable manner."
@@ -1105,15 +1111,16 @@ int IDASensResDQ(int Ns, realtype t,
 
 #define MSG_NULL_P "p = NULL when using internal DQ for sensitivity residual is illegal."
 #define MSG_EWTS_NOW_BAD "At " MSG_TIME ", a component of ewtS has become <= 0."
-#define MSG_SRHSFUNC_FAILED "At " MSG_TIME ", the sensitivity residual routine failed in an unrecoverable manner."
-#define MSG_SRHSFUNC_UNREC "At " MSG_TIME ", the sensitivity residual failed in a recoverable manner, but no recovery is possible."
-#define MSG_SRHSFUNC_REPTD "At " MSG_TIME "repeated recoverable sensitivity residual function errors."
+#define MSG_SRES_FAILED "At " MSG_TIME ", the sensitivity residual routine failed in an unrecoverable manner."
+#define MSG_SRES_UNREC "At " MSG_TIME ", the sensitivity residual failed in a recoverable manner, but no recovery is possible."
+#define MSG_SRES_REPTD "At " MSG_TIME "repeated recoverable sensitivity residual function errors."
 
 #define MSG_NO_TOLQS  "No integration tolerances for quadrature sensitivity variables have been specified."
 #define MSG_NULL_RHSQ "IDAS is expected to use DQ to evaluate the RHS of quad. sensi., but quadratures were not initialized."
 #define MSG_BAD_EWTQS "Initial ewtQS has component(s) equal to zero (illegal)."
 #define MSG_EWTQS_NOW_BAD "At " MSG_TIME ", a component of ewtQS has become <= 0."
 #define MSG_QSRHSFUNC_FAILED "At " MSG_TIME ", the sensitivity quadrature right-hand side routine failed in an unrecoverable manner."
+#define MSG_QSRHSFUNC_REPTD "At " MSG_TIME "repeated recoverable sensitivity quadrature right-hand side function errors."
 #define MSG_QSRHSFUNC_FIRST "The quadrature right-hand side routine failed at the first call."
 
 /* IDASet* / IDAGet* error messages */

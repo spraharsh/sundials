@@ -36,11 +36,9 @@ static int cvNlsResidualSensSim(N_Vector ycorSim, N_Vector resSim,
 static int cvNlsFPFunctionSensSim(N_Vector ycorSim, N_Vector resSim,
                                   void* cvode_mem);
 
-static int cvNlsLSetupSensSim(N_Vector ycorSim, N_Vector resSim,
-                              booleantype jbad, booleantype* jcur,
+static int cvNlsLSetupSensSim(booleantype jbad, booleantype* jcur,
                               void* cvode_mem);
-static int cvNlsLSolveSensSim(N_Vector ycorSim, N_Vector deltaSim,
-                              void* cvode_mem);
+static int cvNlsLSolveSensSim(N_Vector deltaSim, void* cvode_mem);
 static int cvNlsConvTestSensSim(SUNNonlinearSolver NLS,
                                 N_Vector ycorSim, N_Vector delSim,
                                 realtype tol, N_Vector ewtSim, void* cvode_mem);
@@ -127,7 +125,8 @@ int CVodeSetNonlinearSolverSensSim(void *cvode_mem, SUNNonlinearSolver NLS)
   }
 
   /* set convergence test function */
-  retval = SUNNonlinSolSetConvTestFn(cv_mem->NLSsim, cvNlsConvTestSensSim);
+  retval = SUNNonlinSolSetConvTestFn(cv_mem->NLSsim, cvNlsConvTestSensSim,
+                                     cvode_mem);
   if (retval != CV_SUCCESS) {
     cvProcessError(cv_mem, CV_ILL_INPUT, "CVODES",
                    "CVodeSetNonlinearSolverSensSim",
@@ -238,8 +237,7 @@ int cvNlsInitSensSim(CVodeMem cvode_mem)
 }
 
 
-static int cvNlsLSetupSensSim(N_Vector ycorSim, N_Vector resSim,
-                              booleantype jbad, booleantype* jcur,
+static int cvNlsLSetupSensSim(booleantype jbad, booleantype* jcur,
                               void* cvode_mem)
 {
   CVodeMem cv_mem;
@@ -280,7 +278,7 @@ static int cvNlsLSetupSensSim(N_Vector ycorSim, N_Vector resSim,
 }
 
 
-static int cvNlsLSolveSensSim(N_Vector ycorSim, N_Vector deltaSim, void* cvode_mem)
+static int cvNlsLSolveSensSim(N_Vector deltaSim, void* cvode_mem)
 {
   CVodeMem cv_mem;
   int retval, is;

@@ -34,9 +34,8 @@
 static int cvNlsResidual(N_Vector ycor, N_Vector res, void* cvode_mem);
 static int cvNlsFPFunction(N_Vector ycor, N_Vector res, void* cvode_mem);
 
-static int cvNlsLSetup(N_Vector ycor, N_Vector res, booleantype jbad,
-                       booleantype* jcur, void* cvode_mem);
-static int cvNlsLSolve(N_Vector ycor, N_Vector delta, void* cvode_mem);
+static int cvNlsLSetup(booleantype jbad, booleantype* jcur, void* cvode_mem);
+static int cvNlsLSolve(N_Vector delta, void* cvode_mem);
 static int cvNlsConvTest(SUNNonlinearSolver NLS, N_Vector ycor, N_Vector del,
                          realtype tol, N_Vector ewt, void* cvode_mem);
 
@@ -101,7 +100,7 @@ int CVodeSetNonlinearSolver(void *cvode_mem, SUNNonlinearSolver NLS)
   }
 
   /* set convergence test function */
-  retval = SUNNonlinSolSetConvTestFn(cv_mem->NLS, cvNlsConvTest);
+  retval = SUNNonlinSolSetConvTestFn(cv_mem->NLS, cvNlsConvTest, cvode_mem);
   if (retval != CV_SUCCESS) {
     cvProcessError(cv_mem, CV_ILL_INPUT, "CVODE", "CVodeSetNonlinearSolver",
                    "Setting convergence test function failed");
@@ -169,8 +168,7 @@ int cvNlsInit(CVodeMem cvode_mem)
 }
 
 
-static int cvNlsLSetup(N_Vector ycor, N_Vector res, booleantype jbad,
-                       booleantype* jcur, void* cvode_mem)
+static int cvNlsLSetup(booleantype jbad, booleantype* jcur, void* cvode_mem)
 {
   CVodeMem cv_mem;
   int      retval;
@@ -206,7 +204,7 @@ static int cvNlsLSetup(N_Vector ycor, N_Vector res, booleantype jbad,
 }
 
 
-static int cvNlsLSolve(N_Vector ycor, N_Vector delta, void* cvode_mem)
+static int cvNlsLSolve(N_Vector delta, void* cvode_mem)
 {
   CVodeMem cv_mem;
   int      retval;
