@@ -21,6 +21,7 @@
 set(CVODE_examples
   "cv_petsc_ex7\;1\;1\;develop"
   "cvAdvDiff_petsc\;1\;4\;develop"
+  "cvRosenbrock_petsc\;1\;1\;develop"
   )
 
 if(MPI_C_COMPILER)
